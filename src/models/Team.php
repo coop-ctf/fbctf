@@ -185,19 +185,34 @@ class Team extends Model implements Importable, Exportable {
             Configuration::gen('ldap_port'),
             Configuration::gen('ldap_domain_suffix'),
           );
+        $ldap_readonly_dn = 'cn=readonly,cn=system,ou=users,dc=coop-ctf,dc=ca';
+        $ldap_readonly_pwd = 'readonly';
+        $ldap_user_base_dn = 'cn=teams,ou=users,dc=coop-ctf,dc=ca';
+        $ldap_hostname = $ldap_server->getValue();
+        $ldap_port = intval($ldap_port->getValue());
         $ldapconn = ldap_connect(
-          $ldap_server->getValue(),
-          intval($ldap_port->getValue()),
+          $ldap_hostname,
+          $ldap_port,
         );
         if (!$ldapconn)
           return null;
+        ldap_set_option($ldapconn, LDAP_OPT_PROTOCOL_VERSION, 3);
         $team_name = trim($team->getName());
+        $team_email = $team_name.$ldap_domain_suffix->getValue();
         $bind = ldap_bind(
           $ldapconn,
-          $team_name.$ldap_domain_suffix->getValue(),
-          $password,
+          $ldap_readonly_dn,
+          $ldap_readonly_pwd,
         );
         if (!$bind)
+          return null;
+        $result = ldap_search($ldapconn, $ldap_user_base_dn, "(mail=$team_email)", array('dn', 1));
+        $entries = ldap_get_entries($ldapconn, $result);
+        if ($entries['count'] != 1)
+          return null;
+
+        $team_dn = $entries[0]['dn'];
+        if (!ldap_bind($ldapconn, $team_dn, $password))
           return null;
         //Successful Login via LDAP
         return $team;

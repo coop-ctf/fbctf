@@ -147,25 +147,45 @@ class IndexAjaxController extends AjaxController {
           Configuration::gen('ldap_port'),
           Configuration::gen('ldap_domain_suffix'),
         );
+      $ldap_readonly_dn = 'cn=readonly,cn=system,ou=users,dc=coop-ctf,dc=ca';
+      $ldap_readonly_pwd = 'readonly';
+      $ldap_user_base_dn = 'cn=teams,ou=users,dc=coop-ctf,dc=ca';
       // connect to ldap server
+      $ldap_hostname = $ldap_server->getValue();
+      $ldap_port = intval($ldap_port->getValue());
       $ldapconn = ldap_connect(
-        $ldap_server->getValue(),
-        intval($ldap_port->getValue()),
+        $ldap_hostname,
+        $ldap_port,
       );
       if (!$ldapconn)
         return Utils::error_response(
           'Could not connect to LDAP server',
           'registration',
         );
+      ldap_set_option($ldapconn, LDAP_OPT_PROTOCOL_VERSION, 3);
       $team_name = trim($team_name);
+      $team_email = $team_name.$ldap_domain_suffix->getValue();
       $bind = ldap_bind(
         $ldapconn,
-        $team_name.$ldap_domain_suffix->getValue(),
-        $password,
+        $ldap_readonly_dn,
+        $ldap_readonly_pwd,
       );
       if (!$bind)
         return
-          Utils::error_response('LDAP Credentials Error', 'registration');
+          Utils::error_response('LDAP Connection Error (1)', 'registration');
+
+      // List directory in LDAP
+      $result = ldap_search($ldapconn, $ldap_user_base_dn, "(mail=$team_email)", array('dn', 1));
+      $entries = ldap_get_entries($ldapconn, $result);
+      if ($entries['count'] != 1)
+        return
+          Utils::error_response('LDAP Credentials Error (2)', 'registration');
+
+      $team_dn = $entries[0]['dn'];
+      if (!ldap_bind($ldapconn, $team_dn, $password))
+        return
+          Utils::error_response('LDAP Credentials Error (3)', 'registration');
+
       // Use randomly generated password for local account for LDAP users
       // This will help avoid leaking users ldap passwords if the server's database
       // is compromised.
